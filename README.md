@@ -23,6 +23,8 @@ python -m pip install -r requirements.txt
 
 The input CSV must contain `patient_group`, binary `label`, unique `image_id`,
 `canonical_relative_path` (relative to `--image-root`), and `absolute_path`.
+Use `label = 0` for benign and `label = 1` for malignant; each patient group
+must have a single label.
 The study contract expects 2,720 images, 955 groups, and
 252 groups with at least four images.
 
