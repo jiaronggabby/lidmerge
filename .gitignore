@@ -1,0 +1,28 @@
+# Generated local protocol, training and evaluation state
+outputs/
+lidmerge_protocol/
+*.pt
+*.pth
+*.ckpt
+*.csv
+*.json
+!lidpair/contract.json
+
+# Python and local tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.torch/
+
+# Never publish local data or credentials
+*.jpg
+*.jpeg
+*.png
+*.tif
+*.tiff
+*.pdf
+.env
+*credential*
+*secret*

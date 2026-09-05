@@ -1,0 +1,305 @@
+{
+  "protocol_id": "lidmerge_patient_level_photographic_budget_v5_4_corrected_cycles",
+  "primary_backbone": "convnext_tiny",
+  "method_id": "lidmerge",
+  "claim_boundary": "Retrospective single-cohort patient-level internal validation only. The study estimates how diagnostic performance changes when a fixed, blinded budget of one to four routine photographs from the same eligible patient_group is available. ConvNeXt-Tiny is the fixed primary architecture; EfficientNetV2-M and Swin-T are supporting stability analyses. The study does not establish external generalization, a clinical acquisition guideline, a deployment threshold, clinician performance, or the anatomical meaning of any photograph.",
+  "data": {
+    "manifest": "manifest_raw.csv",
+    "group_field": "patient_group",
+    "label_field": "label",
+    "image_field": "absolute_path",
+    "image_id_field": "image_id",
+    "expected_images": 2720,
+    "expected_patient_groups": 955,
+    "expected_primary_groups": 252,
+    "expected_primary_label_counts": {
+      "malignant": 120,
+      "benign": 132
+    },
+    "external_data": false,
+    "manual_annotations": false,
+    "runtime_path_rule": "The frozen manifest remains unchanged. At a mounted runtime, canonical_relative_path may resolve pixels under an explicitly declared image root; this is I/O only and never a model, split, selection, or statistical field."
+  },
+  "cohorts": {
+    "primary": "at_least_four_photographs",
+    "definitions": {
+      "at_least_four_photographs": "all eligible patient_group values with at least four active manifest photographs; the same primary patient groups are used for every K=1,2,3,4 comparison"
+    }
+  },
+  "views": {
+    "budgets": [1, 2, 3, 4],
+    "maximum_budget": 4,
+    "primary_order_seed": 20260719,
+    "alternate_order_seeds": [20260720, 20260721, 20260722, 20260723],
+    "selection_rule": "For every eligible patient_group, SHA256(patient_group, order_seed) initializes a complete randomized order of the group's image_id-sorted active photographs. Budget K is the first K photographs of that fixed order. No label, model score, filename, quality value, or other manifest field may affect ordering or selection.",
+    "training_budget_schedule": [1, 2, 3, 4],
+    "training_rule": "Each epoch uses exactly one scheduled budget K for every patient_group. Training samples K photographs without replacement from that group's frozen primary four-photograph order using SHA256(seed, epoch, patient_group); the shared model is never given K or any photograph-count feature."
+  },
+  "preprocessing": {
+    "image_size": 224,
+    "exif_transpose": true,
+    "resize_rule": "preserve aspect ratio and pad to a 224x224 square",
+    "interpolation": "LANCZOS",
+    "padding_rgb": [0, 0, 0],
+    "normalization_mean": [0.485, 0.456, 0.406],
+    "normalization_std": [0.229, 0.224, 0.225],
+    "evaluation_augmentation": false
+  },
+  "validation": {
+    "outer_folds": 5,
+    "inner_folds": 3,
+    "fold_seed": 20260719,
+    "selection_seed": 42,
+    "formal_seeds": [42, 2025, 2026],
+    "threshold_prediction_seeds": [42, 2025, 2026],
+    "backbone_screen_aggregation": "mean",
+    "backbone_screen_budget": 1,
+    "selection_metric": "sensitivity_at_90_specificity_then_auprc_then_auroc",
+    "primary_endpoint": "standardized partial AUROC over FPR <= 0.10",
+    "bootstrap_replicates": 2000,
+    "bootstrap_unit": "patient_group"
+  },
+  "backbone_screen": ["convnext_tiny"],
+  "aggregation": {
+    "training": "mean",
+    "training_route_name": "mean_train",
+    "inference": ["mean", "top2_mean", "max"],
+    "image_logit_artifact": "image_logits.csv",
+    "rule": "Exactly one shared image model is trained per split, seed, and backbone with patient-level mean-logit binary cross entropy. Each route writes ordered z1..z4 values to image_logits.csv, rebuilds every K=1..4 mean, top-2 mean, and max probability from that artifact before completion, and writes patient-level predictions only after that reconstruction passes. Top-2 mean and max are prespecified inference contrasts, not separately optimized models."
+  },
+  "architecture_robustness": {
+    "backbones": ["convnext_tiny", "efficientnet_v2_m", "swin_t"],
+    "aggregation": "mean",
+    "seeds": [42, 2025, 2026],
+    "comparison": {"candidate_budget": 4, "comparator_budget": 1},
+    "metrics": ["auroc", "auprc", "brier"],
+      "rule": "This is a predeclared supporting architecture-replication analysis. The fixed ConvNeXt-Tiny primary route supplies the main result, while EfficientNetV2-M and Swin-T are trained in supporting routes. All three use the same locked K-agnostic mean-training schedule and are evaluated at K=1,2,3,4. It does not select a backbone, threshold, budget, or primary claim, and it does not add learned fusion modules or non-patient-level inputs."
+  },
+  "cpu_logit_postprocessing": {
+    "status": "predeclared_secondary_analysis",
+    "input_artifact": "image_logits.csv",
+    "source_backbone": "convnext_tiny",
+    "source_training_route_name": "mean_train",
+    "aggregators": [
+      "xgboost",
+      "random_forest",
+      "logistic_regression"
+    ],
+    "budgets": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "feature_rule": "For each K, use only the first K ordered image logits from the locked photograph prefix, sort those logits in descending order, and fit one low-capacity patient-level aggregator for that K. No image count, metadata, filename, source, batch, or label-derived feature is allowed.",
+    "nested_rule": "Within each outer fold and formal seed, select the declared aggregator configuration by three-fold cross-fitted log loss on the outer-training patient groups, refit it on all cross-fitted inner logits, and apply it once to the outer-test logits. Select one outer-fold threshold from the formal-seed-averaged cross-fitted inner probabilities at minimum specificity 0.90.",
+    "role": "Secondary exploratory comparison against the shared-logit mean, top-2 mean, and maximum inference rules. It does not retrain the image encoder, alter the primary mean-aggregation analysis, select a backbone, or define a new confirmatory endpoint.",
+    "threshold_metric": "inner_cross_fitted_patient_specificity_at_least_0.90",
+    "selection_metric": "mean_inner_cross_fitted_log_loss",
+    "xgboost": {
+      "library": "xgboost",
+      "candidates": [
+        {
+          "candidate_id": "xgb_d1_n50",
+          "n_estimators": 50,
+          "max_depth": 1,
+          "learning_rate": 0.05,
+          "min_child_weight": 3,
+          "reg_lambda": 5.0,
+          "reg_alpha": 0.0,
+          "subsample": 1.0,
+          "colsample_bytree": 1.0
+        },
+        {
+          "candidate_id": "xgb_d1_n100",
+          "n_estimators": 100,
+          "max_depth": 1,
+          "learning_rate": 0.05,
+          "min_child_weight": 3,
+          "reg_lambda": 5.0,
+          "reg_alpha": 0.0,
+          "subsample": 1.0,
+          "colsample_bytree": 1.0
+        },
+        {
+          "candidate_id": "xgb_d2_n50",
+          "n_estimators": 50,
+          "max_depth": 2,
+          "learning_rate": 0.05,
+          "min_child_weight": 3,
+          "reg_lambda": 5.0,
+          "reg_alpha": 0.0,
+          "subsample": 1.0,
+          "colsample_bytree": 1.0
+        },
+        {
+          "candidate_id": "xgb_d2_n100",
+          "n_estimators": 100,
+          "max_depth": 2,
+          "learning_rate": 0.05,
+          "min_child_weight": 3,
+          "reg_lambda": 5.0,
+          "reg_alpha": 0.0,
+          "subsample": 1.0,
+          "colsample_bytree": 1.0
+        }
+      ]
+    },
+    "random_forest": {
+      "library": "scikit-learn",
+      "candidates": [
+        {
+          "candidate_id": "rf_d2_leaf3",
+          "n_estimators": 300,
+          "max_depth": 2,
+          "min_samples_leaf": 3,
+          "max_features": 1.0,
+          "class_weight": "balanced_subsample"
+        },
+        {
+          "candidate_id": "rf_d2_leaf5",
+          "n_estimators": 300,
+          "max_depth": 2,
+          "min_samples_leaf": 5,
+          "max_features": 1.0,
+          "class_weight": "balanced_subsample"
+        },
+        {
+          "candidate_id": "rf_d3_leaf3",
+          "n_estimators": 300,
+          "max_depth": 3,
+          "min_samples_leaf": 3,
+          "max_features": 1.0,
+          "class_weight": "balanced_subsample"
+        },
+        {
+          "candidate_id": "rf_d3_leaf5",
+          "n_estimators": 300,
+          "max_depth": 3,
+          "min_samples_leaf": 5,
+          "max_features": 1.0,
+          "class_weight": "balanced_subsample"
+        }
+      ]
+    },
+    "logistic_regression": {
+      "library": "scikit-learn",
+      "candidates": [
+        {
+          "candidate_id": "logreg_c0_1",
+          "C": 0.1,
+          "penalty": "l2",
+          "solver": "lbfgs",
+          "max_iter": 1000,
+          "class_weight": "balanced"
+        },
+        {
+          "candidate_id": "logreg_c1",
+          "C": 1.0,
+          "penalty": "l2",
+          "solver": "lbfgs",
+          "max_iter": 1000,
+          "class_weight": "balanced"
+        },
+        {
+          "candidate_id": "logreg_c10",
+          "C": 10.0,
+          "penalty": "l2",
+          "solver": "lbfgs",
+          "max_iter": 1000,
+          "class_weight": "balanced"
+        }
+      ]
+    }
+  },
+  "comparisons": {
+    "primary": {
+      "candidate": {"variant": "mean", "budget": 4},
+      "comparator": {"variant": "mean", "budget": 1},
+      "endpoint": "standardized partial AUROC at FPR <= 0.10"
+    },
+    "secondary_incremental": [
+      {"variant": "mean", "candidate_budget": 2, "comparator_budget": 1},
+      {"variant": "mean", "candidate_budget": 3, "comparator_budget": 2},
+      {"variant": "mean", "candidate_budget": 4, "comparator_budget": 3}
+    ],
+    "secondary_aggregation_budgets": [1, 2, 3, 4],
+    "pointwise_ci_metrics": ["standardized_pauc_at_fpr_0_10", "sensitivity", "specificity", "auroc", "auprc", "fnr", "brier", "ece_10"],
+    "multiplicity": "The sole primary hypothesis test is mean-aggregation K4-versus-K1 standardized partial AUROC at FPR <= 0.10. Pooled OOF sensitivity at 90% specificity, AUPRC, overall AUROC, Brier, ECE, FNR, top-2 mean, and max are secondary or exploratory results with patient-level confidence intervals."
+  },
+  "counterfactual_evaluation": {
+    "conditions": ["true_prefix", "reversed_prefix", "duplicate_view1", "lowpass_view1"],
+    "invariance_tolerance": 0.002,
+    "lowpass_kernel_size": 9,
+    "rule": "For each K>=2, reversed_prefix is an implementation-invariance check for symmetric aggregation. duplicate_view1 repeats the first K=1 photograph K times and must equal the K=1 probability for mean, top-2 mean, and max aggregation. lowpass_view1 applies a fixed reporting-only low-pass perturbation to the first photograph while retaining the remaining photographs, testing whether additional inputs buffer one impaired photograph. Reversal and duplicate conditions are implementation gates; lowpass_view1 is a supporting robustness analysis, not a diagnostic-superiority claim."
+  },
+  "pilot": {
+    "outer_fold": 0,
+    "inner_fold": 0,
+    "seed": 42,
+    "backbone": "convnext_tiny",
+    "training_aggregation": "mean",
+    "inference_aggregations": ["mean", "top2_mean", "max"],
+    "budgets": [1, 2, 3, 4],
+    "confirmatory": false,
+    "rule": "Development-only inner-validation runtime and artifact check. It never evaluates the held-out outer fold and cannot select a budget, backbone, threshold, or final claim."
+  },
+  "model": {
+    "embedding_dim": 256,
+    "dropout": 0.2,
+    "image_head": "one scalar logit from a shared image encoder",
+    "training_aggregation": "mean-logit only",
+    "mean_aggregation": "z_K = mean(z_1, ..., z_K)",
+    "top2_mean_aggregation": "z_K = mean of the two largest image logits when K >= 2; for K=1, z_K = z_1",
+    "max_aggregation": "z_K = max(z_1, ..., z_K)",
+    "explicitly_excluded": ["attention", "quality head", "evidence slots", "pair gate", "contrastive learning", "consistency losses", "photograph-count input"]
+  },
+  "training": {
+    "cycle_length": 4,
+    "diagnostic_epochs": 60,
+    "early_stopping": {
+      "enabled_for_inner_routes": true,
+      "monitor": "inner_validation_patient_bce_k1_k4_mean",
+      "mode": "min",
+      "minimum_cycles": 3,
+      "minimum_epochs": 12,
+      "patience_cycles": 3,
+      "min_delta": 0.0005,
+      "outer_epoch_rule": "4 * median(best_cycle) across inner validation routes, clamped to [12,60]"
+    },
+    "mixed_precision": true,
+    "memory_strategy": "one K-view diagnostic forward/backward/optimizer step per patient batch",
+    "batch_size": 4,
+    "patient_sampler": "Every available training patient_group appears exactly once per epoch; no with-replacement oversampling is used.",
+    "learning_rate": 0.0001,
+    "weight_decay": 0.0001,
+    "augmentation": {
+      "horizontal_flip_probability": 0.5,
+      "rotation_degrees": 10.0,
+      "brightness_jitter": 0.12,
+      "contrast_jitter": 0.12
+    },
+    "objective": "patient-level binary cross entropy only"
+  },
+  "execution": {
+    "require_cuda": true,
+    "require_clean_git": false,
+    "allow_weight_download": false,
+    "primary_output_namespace": "outputs_lidmerge_corrected_cycles",
+    "no_formal_training_without_explicit_stage": true,
+    "require_production_backward_smoke": false,
+    "checkpoint_policy": {
+      "local_checkpoint_allowed": true,
+      "github_sync": "exclude_checkpoints_and_raw_images"
+    },
+    "required_run_provenance": [
+      "git_commit_and_clean_status",
+      "code_fingerprint",
+      "manifest_and_contract_sha256",
+      "seed_fold_backbone_variant",
+      "runtime_versions_and_cuda_device",
+      "output_root_and_run_directory",
+      "checkpoint_prediction_metric_and_history_sha256"
+    ]
+  }
+}
