@@ -60,7 +60,7 @@ def _run_all(args: argparse.Namespace) -> int:
     for outer in range(outer_folds):
         selected = Path(output) / "selection" / f"outer_{outer}" / "backbone_selection.json"
         selected_backbone = json.loads(selected.read_text(encoding="utf-8"))["backbone"]
-        for inner in range(3):
+        for inner in range(inner_folds):
             for seed in formal_seeds:
                 if seed == int(validation["selection_seed"]):
                     continue
@@ -98,15 +98,20 @@ def _run_all(args: argparse.Namespace) -> int:
                     "--backbone", backbone, "--training-epochs", str(epochs)])
                 if code:
                     return code
+    postprocess_args = ["--protocol-root", protocol, "--output-root", output]
+    if args.force:
+        postprocess_args.append("--force")
     for module in ("lidpair.summarize", "lidpair.counterfactual", "lidpair.pair_draw"):
-        code = _module(module, ["--protocol-root", protocol, "--output-root", output])
+        code = _module(module, postprocess_args)
         if code:
             return code
     code = _module("lidpair.compare", ["--output-root", output] + (["--force"] if args.force else []))
     if code:
         return code
-    code = _module("lidpair.backbone_robustness", ["--protocol-root", protocol,
-        "--output-root", output])
+    robustness_args = ["--protocol-root", protocol, "--output-root", output]
+    if args.force:
+        robustness_args.append("--force")
+    code = _module("lidpair.backbone_robustness", robustness_args)
     if code:
         return code
     learned_args = ["--protocol-root", protocol, "--source-root", output,

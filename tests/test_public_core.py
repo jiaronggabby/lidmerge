@@ -13,7 +13,12 @@ import pandas as pd
 
 from lidpair.metrics import select_threshold_at_specificity
 from lidpair.model import aggregate_image_logits
-from lidpair.run_cv5 import _checkpoint_eligible, _training_policy, _validate_training_epochs
+from lidpair.run_cv5 import (
+    _checkpoint_eligible,
+    _training_policy,
+    _validate_shared_logit_prediction_trace,
+    _validate_training_epochs,
+)
 
 
 class PublicCoreTests(unittest.TestCase):
@@ -28,6 +33,42 @@ class PublicCoreTests(unittest.TestCase):
         self.assertEqual(float(aggregate_image_logits(values, "mean")[0]), 2.0)
         self.assertEqual(float(aggregate_image_logits(values, "top2_mean")[0]), 2.0)
         self.assertEqual(float(aggregate_image_logits(values, "max")[0]), 2.0)
+
+    def test_saved_logit_trace_reconstructs_top2_mean(self):
+        logits = np.asarray([1.0, 3.0, 2.0, -1.0], dtype=float)
+        image_rows = [
+            {
+                "patient_group": "group_a",
+                "label": 1,
+                "view_rank": rank,
+                "image_logit": value,
+                "training_aggregation": "mean",
+            }
+            for rank, value in enumerate(logits, start=1)
+        ]
+        prediction_rows = []
+        for budget in range(1, 5):
+            prefix = logits[:budget]
+            aggregates = {
+                "mean": float(prefix.mean()),
+                "top2_mean": float(np.sort(prefix)[-min(2, budget):].mean()),
+                "max": float(prefix.max()),
+            }
+            for variant, logit in aggregates.items():
+                prediction_rows.append({
+                    "patient_group": "group_a",
+                    "label": 1,
+                    "budget": budget,
+                    "variant": variant,
+                    "probability": float(1.0 / (1.0 + np.exp(-logit))),
+                    "training_aggregation": "mean",
+                })
+        _validate_shared_logit_prediction_trace(
+            pd.DataFrame(prediction_rows),
+            pd.DataFrame(image_rows),
+            budgets=[1, 2, 3, 4],
+            aggregations=["mean", "top2_mean", "max"],
+        )
 
     def test_production_cycle_policy(self):
         config = json.loads((Path(__file__).parents[1] / "lidpair" / "contract.json").read_text())
@@ -128,6 +169,21 @@ class PublicCoreTests(unittest.TestCase):
             self.assertEqual(sum(m == "lidpair.learned_aggregation" for m, _ in calls), 1)
             learned = next(a for m, a in calls if m == "lidpair.learned_aggregation")
             self.assertNotIn("--force", learned)
+
+            calls.clear()
+            Args.force = True
+            with patch.object(run_experiment, "_module", side_effect=fake_module):
+                self.assertEqual(run_experiment._run_all(Args()), 0)
+            for module in (
+                "lidpair.summarize",
+                "lidpair.counterfactual",
+                "lidpair.pair_draw",
+                "lidpair.compare",
+                "lidpair.backbone_robustness",
+                "lidpair.learned_aggregation",
+            ):
+                argv = next(a for m, a in calls if m == module)
+                self.assertIn("--force", argv)
         finally:
             shutil.rmtree(temp_root, ignore_errors=True)
 

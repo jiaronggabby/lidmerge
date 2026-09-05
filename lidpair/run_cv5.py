@@ -563,6 +563,9 @@ def _validate_shared_logit_prediction_trace(
             for aggregation in aggregations:
                 if aggregation == "mean":
                     logit = float(prefix.mean())
+                elif aggregation == "top2_mean":
+                    top_k = min(2, len(prefix))
+                    logit = float(np.sort(prefix)[-top_k:].mean())
                 elif aggregation == "max":
                     logit = float(prefix.max())
                 else:
